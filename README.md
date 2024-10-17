@@ -11,3 +11,4 @@ This is a wacky terminal application emulating a database CLI. Notably, this app
 - [ ] Add fun interactive terminal games
 - [ ] Add Database on fire
 - [ ] Add random data dropping
+- [ ] Make everything slow because
