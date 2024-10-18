@@ -1,3 +1,5 @@
+mod game;
+
 use std::io::{stdin, stdout, Write};
 
 use rand::Rng;
@@ -98,13 +100,16 @@ impl WackyDB {
         match chaos_result {
             ChaosResult::GamingTime => {
                 println!("It's time to play a classic!");
-                let outcome = play_game();
-                if outcome {
-                    return Ok(());
-                } else {
-                    return Err(
-                        "You lost the game! You also lost some PRECIOUS data as well!".into(),
-                    );
+                let outcome = game::play_game();
+                match outcome {
+                    Ok(_) => {
+                        return Ok(());
+                    }
+                    Err(_) => {
+                        return Err(
+                            "You lost the game! You also lost some PRECIOUS data as well!".into(),
+                        );
+                    }
                 }
             }
             ChaosResult::DatabaseOnFire => {
@@ -153,13 +158,16 @@ impl WackyDB {
         match chaos_result {
             ChaosResult::GamingTime => {
                 println!("It's time to play a classic!");
-                let outcome = play_game();
-                if outcome {
-                    return Ok(());
-                } else {
-                    return Err(
-                        "You lost the game! You also lost some PRECIOUS data as well!".into(),
-                    );
+                let outcome = game::play_game();
+                match outcome {
+                    Ok(_) => {
+                        return Ok(());
+                    }
+                    Err(_) => {
+                        return Err(
+                            "You lost the game! You also lost some PRECIOUS data as well!".into(),
+                        );
+                    }
                 }
             }
             ChaosResult::DatabaseOnFire => {
@@ -189,47 +197,80 @@ impl WackyDB {
         Ok(())
     }
 
-    fn select(&self, table_name: &str, columns: &str, where_clauses: &Vec<Assignment>) {
-        if !self.table_exists(table_name).unwrap_or(false) {
-            println!("Error: Table '{}' does not exist.", table_name);
-            return;
-        }
+    fn select(
+        &self,
+        table_name: &str,
+        columns: &str,
+        where_clauses: &Vec<Assignment>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let chaos_result = Self::chaos_engine();
 
-        let mut where_str = String::new();
-        for assignment in where_clauses {
-            match &assignment.value {
-                sqlparser::ast::Expr::Value(value) => match value {
-                    sqlparser::ast::Value::SingleQuotedString(s) => {
-                        where_str.push_str(&format!("{} = '{}', ", assignment.target, s));
+        match chaos_result {
+            ChaosResult::GamingTime => {
+                println!("It's time to play a classic!");
+                let outcome = game::play_game();
+                match outcome {
+                    Ok(_) => {
+                        return Ok(());
                     }
-                    sqlparser::ast::Value::Number(n, _) => {
-                        where_str.push_str(&format!("{} = {}, ", assignment.target, n));
+                    Err(_) => {
+                        return Err(
+                            "You lost the game! You also lost some PRECIOUS data as well!".into(),
+                        );
                     }
-                    _ => {
-                        println!("Unimplemented value:\n {:?}", value);
+                }
+            }
+            ChaosResult::DatabaseOnFire => {
+                return Err("Oh no, the database is on fire! 🔥".into());
+            }
+            ChaosResult::DataInTrash => {
+                return Err(
+                    "Oops, I dropped your data in the trash! I think I can recover it?".into(),
+                );
+            }
+            ChaosResult::NothingHappened => {
+                return Err("Nah, nothing happened. I'm feelin a little QUIRKY today".into());
+            }
+            _ => {
+                let mut where_str = String::new();
+                for assignment in where_clauses {
+                    match &assignment.value {
+                        sqlparser::ast::Expr::Value(value) => match value {
+                            sqlparser::ast::Value::SingleQuotedString(s) => {
+                                where_str.push_str(&format!("{} = '{}', ", assignment.target, s));
+                            }
+                            sqlparser::ast::Value::Number(n, _) => {
+                                where_str.push_str(&format!("{} = {}, ", assignment.target, n));
+                            }
+                            _ => {
+                                println!("Unimplemented value:\n {:?}", value);
+                            }
+                        },
+                        _ => {
+                            println!("Unimplemented expression:\n {:?}", assignment.value);
+                        }
                     }
-                },
-                _ => {
-                    println!("Unimplemented expression:\n {:?}", assignment.value);
+                }
+
+                // Remove the trailing comma and space
+                where_str.pop();
+                where_str.pop();
+
+                if where_str.is_empty() {
+                    where_str = "1 = 1".to_string();
+                }
+
+                let sql = format!("SELECT {} FROM {} WHERE {}", columns, table_name, where_str);
+                let mut stmt = self.conn.prepare(&sql).unwrap();
+                let mut rows = stmt.query([]).unwrap();
+
+                while let Some(row) = rows.next().unwrap() {
+                    println!("{:?}", row);
                 }
             }
         }
 
-        // Remove the trailing comma and space
-        where_str.pop();
-        where_str.pop();
-
-        if where_str.is_empty() {
-            where_str = "1 = 1".to_string();
-        }
-
-        let sql = format!("SELECT {} FROM {} WHERE {}", columns, table_name, where_str);
-        let mut stmt = self.conn.prepare(&sql).unwrap();
-        let mut rows = stmt.query([]).unwrap();
-
-        while let Some(row) = rows.next().unwrap() {
-            println!("{:?}", row);
-        }
+        Ok(())
     }
 
     fn update(
@@ -307,10 +348,6 @@ fn sanitize_db_name(name: &str) -> Result<&str, &str> {
     }
 
     Ok(name)
-}
-
-fn play_game() -> bool {
-    return true;
 }
 
 fn main() {
