@@ -4,7 +4,7 @@ use rand::Rng;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use sqlparser::{
-    ast::{ColumnOption, Statement},
+    ast::{Assignment, ColumnOption, Ident, ObjectName, Statement},
     dialect::GenericDialect,
     parser::Parser,
 };
@@ -188,6 +188,108 @@ impl WackyDB {
 
         Ok(())
     }
+
+    fn select(&self, table_name: &str, columns: &str, where_clauses: &Vec<Assignment>) {
+        if !self.table_exists(table_name).unwrap_or(false) {
+            println!("Error: Table '{}' does not exist.", table_name);
+            return;
+        }
+
+        let mut where_str = String::new();
+        for assignment in where_clauses {
+            match &assignment.value {
+                sqlparser::ast::Expr::Value(value) => match value {
+                    sqlparser::ast::Value::SingleQuotedString(s) => {
+                        where_str.push_str(&format!("{} = '{}', ", assignment.target, s));
+                    }
+                    sqlparser::ast::Value::Number(n, _) => {
+                        where_str.push_str(&format!("{} = {}, ", assignment.target, n));
+                    }
+                    _ => {
+                        println!("Unimplemented value:\n {:?}", value);
+                    }
+                },
+                _ => {
+                    println!("Unimplemented expression:\n {:?}", assignment.value);
+                }
+            }
+        }
+
+        // Remove the trailing comma and space
+        where_str.pop();
+        where_str.pop();
+
+        if where_str.is_empty() {
+            where_str = "1 = 1".to_string();
+        }
+
+        let sql = format!("SELECT {} FROM {} WHERE {}", columns, table_name, where_str);
+        let mut stmt = self.conn.prepare(&sql).unwrap();
+        let mut rows = stmt.query([]).unwrap();
+
+        while let Some(row) = rows.next().unwrap() {
+            println!("{:?}", row);
+        }
+    }
+
+    fn update(
+        &self,
+        table_name: &str,
+        assignments: &Vec<Assignment>,
+        where_clauses: &Vec<Assignment>,
+    ) {
+        let mut set_str = String::new();
+        for assignment in assignments {
+            match &assignment.value {
+                sqlparser::ast::Expr::Value(value) => match value {
+                    sqlparser::ast::Value::SingleQuotedString(s) => {
+                        set_str.push_str(&format!("{} = '{}', ", assignment.target, s));
+                    }
+                    sqlparser::ast::Value::Number(n, _) => {
+                        set_str.push_str(&format!("{} = {}, ", assignment.target, n));
+                    }
+                    _ => {
+                        println!("Unimplemented value:\n {:?}", value);
+                    }
+                },
+                _ => {
+                    println!("Unimplemented expression:\n {:?}", assignment.value);
+                }
+            }
+        }
+
+        // Remove the trailing comma and space
+        set_str.pop();
+        set_str.pop();
+
+        let mut where_str = String::new();
+        for assignment in where_clauses {
+            match &assignment.value {
+                sqlparser::ast::Expr::Value(value) => match value {
+                    sqlparser::ast::Value::SingleQuotedString(s) => {
+                        where_str.push_str(&format!("{} = '{}', ", assignment.target, s));
+                    }
+                    sqlparser::ast::Value::Number(n, _) => {
+                        where_str.push_str(&format!("{} = {}, ", assignment.target, n));
+                    }
+                    _ => {
+                        println!("Unimplemented value:\n {:?}", value);
+                    }
+                },
+                _ => {
+                    println!("Unimplemented expression:\n {:?}", assignment.value);
+                }
+            }
+        }
+
+        // Remove the trailing comma and space
+        where_str.pop();
+        where_str.pop();
+
+        let sql = format!("UPDATE {} SET {} WHERE {}", table_name, set_str, where_str);
+        let mut stmt = self.conn.prepare(&sql).unwrap();
+        stmt.execute([]).unwrap();
+    }
 }
 
 fn sanitize_db_name(name: &str) -> Result<&str, &str> {
@@ -232,6 +334,7 @@ fn main() {
             Ok(statements) => {
                 for statement in statements {
                     match statement {
+                        // Update to handle more options later
                         Statement::CreateTable(create_table) => {
                             let object_name = create_table.name.0;
                             if object_name.len() > 1 {
@@ -285,6 +388,7 @@ fn main() {
                                 println!("Error creating table: {}", e);
                             }
                         }
+                        // Update to handle more options later
                         Statement::Insert(insert) => {
                             let object_name = insert.table_name.0;
 
@@ -349,6 +453,212 @@ fn main() {
                                     _ => {
                                         println!("Unimplemented body:\n {:?}", body);
                                     }
+                                }
+                            }
+                        }
+                        // Update to handle more options later
+                        Statement::Query(query) => {
+                            let body = query.body;
+                            if let sqlparser::ast::SetExpr::Select(select) = *body {
+                                let projection = select.projection;
+                                let from = select.from;
+                                let selection = select.selection;
+
+                                if !from.is_empty() {
+                                    let table_name = match &from[0].relation {
+                                        sqlparser::ast::TableFactor::Table {
+                                            name, alias, ..
+                                        } => {
+                                            let object_name = &name.0;
+                                            if object_name.len() > 1 {
+                                                println!("Sorry, WackyDB doesn't do schemas or databases! Only tables are allowed in this land.");
+                                                continue;
+                                            }
+                                            object_name[0].clone().value
+                                        }
+                                        _ => {
+                                            println!("Unimplemented table:\n {:?}", from[0]);
+                                            continue;
+                                        }
+                                    };
+
+                                    // Check if the table exists
+                                    if !db.table_exists(&table_name).unwrap_or(false) {
+                                        println!("Error: Table '{}' does not exist.", table_name);
+                                        continue;
+                                    }
+
+                                    let columns = projection
+                                        .iter()
+                                        .map(|col| col.to_string())
+                                        .collect::<Vec<String>>()
+                                        .join(", ");
+
+                                    let mut where_clauses = Vec::new();
+                                    if let Some(ref selection) = selection {
+                                        match selection {
+                                            sqlparser::ast::Expr::BinaryOp { left, op, right } => {
+                                                let column = match **left {
+                                                    sqlparser::ast::Expr::Identifier(ref id) => {
+                                                        let column = id.value.clone();
+                                                        column
+                                                    }
+                                                    _ => {
+                                                        println!(
+                                                            "Unimplemented selection:\n {:?}",
+                                                            selection
+                                                        );
+                                                        continue;
+                                                    }
+                                                };
+                                                let value = match **right {
+                                                    sqlparser::ast::Expr::Value(ref value) => match value {
+                                                        sqlparser::ast::Value::SingleQuotedString(s) => {
+                                                            s.clone()
+                                                        }
+                                                        sqlparser::ast::Value::Number(n, _) => n.clone(),
+                                                        _ => {
+                                                            println!("Unimplemented value:\n {:?}", value);
+                                                            continue;
+                                                        }
+                                                    },
+                                                    _ => {
+                                                        println!(
+                                                            "Unimplemented selection:\n {:?}",
+                                                            selection
+                                                        );
+                                                        continue;
+                                                    }
+                                                };
+                                                where_clauses.push(Assignment {
+                                                    target: sqlparser::ast::AssignmentTarget::ColumnName(
+                                                        ObjectName {
+                                                            0: vec![Ident {
+                                                                value: column,
+                                                                quote_style: None,
+                                                            }],
+                                                        },
+                                                    ),
+                                                    value: sqlparser::ast::Expr::Value(
+                                                        sqlparser::ast::Value::SingleQuotedString(value),
+                                                    ),
+                                                });
+                                            }
+                                            _ => {
+                                                println!(
+                                                    "Unimplemented selection:\n {:?}",
+                                                    selection
+                                                );
+                                            }
+                                        }
+                                    }
+                                    db.select(&table_name, &columns, &where_clauses);
+                                }
+                            }
+                        }
+                        // Update to handle more options later
+                        Statement::Update {
+                            table,
+                            assignments,
+                            from,
+                            selection,
+                            returning,
+                        } => {
+                            let table_name = match table.relation {
+                                sqlparser::ast::TableFactor::Table { name, alias, .. } => {
+                                    let object_name = name.0;
+                                    if object_name.len() > 1 {
+                                        println!("Sorry, WackyDB doesn't do schemas or databases! Only tables are allowed in this land.");
+                                        continue;
+                                    }
+                                    object_name[0].clone().value
+                                }
+                                _ => {
+                                    println!("Unimplemented table:\n {:?}", table);
+                                    continue;
+                                }
+                            };
+
+                            // Check if the table exists
+                            if !db.table_exists(&table_name).unwrap_or(false) {
+                                println!("Error: Table '{}' does not exist.", table_name);
+                                continue;
+                            }
+
+                            let mut where_clauses = Vec::new();
+                            if let Some(ref selection) = selection {
+                                match selection {
+                                    sqlparser::ast::Expr::BinaryOp { left, op, right } => {
+                                        let column = match **left {
+                                            sqlparser::ast::Expr::Identifier(ref id) => {
+                                                let column = id.value.clone();
+                                                column
+                                            }
+                                            _ => {
+                                                println!(
+                                                    "Unimplemented selection:\n {:?}",
+                                                    selection
+                                                );
+                                                continue;
+                                            }
+                                        };
+                                        let value = match **right {
+                                            sqlparser::ast::Expr::Value(ref value) => match value {
+                                                sqlparser::ast::Value::SingleQuotedString(s) => {
+                                                    s.clone()
+                                                }
+                                                sqlparser::ast::Value::Number(n, _) => n.clone(),
+                                                _ => {
+                                                    println!("Unimplemented value:\n {:?}", value);
+                                                    continue;
+                                                }
+                                            },
+                                            _ => {
+                                                println!(
+                                                    "Unimplemented selection:\n {:?}",
+                                                    selection
+                                                );
+                                                continue;
+                                            }
+                                        };
+                                        where_clauses.push(Assignment {
+                                            target: sqlparser::ast::AssignmentTarget::ColumnName(
+                                                ObjectName {
+                                                    0: vec![Ident {
+                                                        value: column,
+                                                        quote_style: None,
+                                                    }],
+                                                },
+                                            ),
+                                            value: sqlparser::ast::Expr::Value(
+                                                sqlparser::ast::Value::SingleQuotedString(value),
+                                            ),
+                                        });
+                                    }
+                                    _ => {
+                                        println!("Unimplemented selection:\n {:?}", selection);
+                                    }
+                                }
+                            }
+                            db.update(&table_name, &assignments, &where_clauses);
+                        }
+                        // Update to handle more options later
+                        Statement::Drop {
+                            object_type, names, ..
+                        } => {
+                            println!("{} {:?}", object_type, names);
+                            for name in names {
+                                let object_name = &name.0;
+                                if object_name.len() > 1 {
+                                    println!("Sorry, WackyDB doesn't do schemas or databases! Only tables are allowed in this land.");
+                                    return;
+                                }
+                                let table_name = object_name[0].clone().value;
+
+                                if let Err(e) =
+                                    db.conn.execute(&format!("DROP TABLE {}", table_name), [])
+                                {
+                                    println!("{}", e);
                                 }
                             }
                         }

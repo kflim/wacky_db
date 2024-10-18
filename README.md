@@ -7,7 +7,7 @@ We're all used to databases storing your data and efficiently giving you what yo
 This is a wacky terminal application emulating a database CLI. Notably, this application uses SQLite as the database (for now). Simply run it as you would a normal rust program using the command `cargo run`.
 
 - [x] Add CREATE and INSERT commands
-- [ ] Add UPDATE and DELETE commands
+- [x] Add SELECT, UPDATE and DROP commands
 - [ ] Add fun interactive terminal games
 - [ ] Add Database on fire
 - [ ] Add random data dropping
